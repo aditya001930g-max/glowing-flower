@@ -1,0 +1,1203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ethereal Bloom — Cinematic Flower Macro</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            background: #000;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: 'Georgia', serif;
+        }
+
+        #mainCanvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        /* Bloom / Halation post-process layer */
+        #bloomCanvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            mix-blend-mode: screen;
+            pointer-events: none;
+            opacity: 0.6;
+        }
+
+        /* Secondary glow layer */
+        #glowCanvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            mix-blend-mode: screen;
+            pointer-events: none;
+            opacity: 0.35;
+        }
+
+        /* Film grain overlay */
+        #grainOverlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            pointer-events: none;
+            opacity: 0.04;
+            z-index: 10;
+        }
+
+        /* Cinematic vignette */
+        .vignette {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            pointer-events: none;
+            z-index: 5;
+            background: radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.7) 100%);
+        }
+
+        /* Letterbox bars for cinematic feel */
+        .letterbox-top, .letterbox-bottom {
+            position: fixed;
+            left: 0;
+            width: 100vw;
+            height: 5vh;
+            background: #000;
+            z-index: 20;
+        }
+        .letterbox-top { top: 0; }
+        .letterbox-bottom { bottom: 0; }
+
+        /* Title overlay */
+        .title-overlay {
+            position: fixed;
+            bottom: 7vh;
+            left: 50%;
+            transform: translateX(-50%);
+            color: rgba(255, 220, 180, 0.5);
+            font-size: 0.9rem;
+            letter-spacing: 6px;
+            text-transform: uppercase;
+            z-index: 25;
+            pointer-events: none;
+            text-shadow: 0 0 20px rgba(255, 180, 100, 0.3);
+        }
+
+        /* Subtle controls */
+        .controls {
+            position: fixed;
+            top: 7vh;
+            right: 20px;
+            z-index: 25;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            opacity: 0.3;
+            transition: opacity 0.5s;
+        }
+        .controls:hover { opacity: 1; }
+        .controls button {
+            background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(255,255,255,0.15);
+            color: rgba(255,220,180,0.7);
+            padding: 6px 14px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-family: 'Georgia', serif;
+            font-size: 0.75rem;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            transition: all 0.3s;
+            backdrop-filter: blur(10px);
+        }
+        .controls button:hover {
+            background: rgba(255,180,100,0.15);
+            border-color: rgba(255,180,100,0.4);
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="mainCanvas"></canvas>
+    <canvas id="bloomCanvas"></canvas>
+    <canvas id="glowCanvas"></canvas>
+    <canvas id="grainOverlay"></canvas>
+    <div class="vignette"></div>
+    <div class="letterbox-top"></div>
+    <div class="letterbox-bottom"></div>
+    <div class="title-overlay">✦ Ethereal Bloom ✦</div>
+
+    <div class="controls">
+        <button onclick="resetBloom()">Rebirth</button>
+        <button onclick="togglePalette()">Palette</button>
+        <button onclick="toggleSpeed()">Tempo</button>
+    </div>
+
+    <script>
+    // ═══════════════════════════════════════════════════════
+    //  CONFIGURATION
+    // ═══════════════════════════════════════════════════════
+
+    const CONFIG = {
+        // Color palettes (moody, cinematic)
+        palettes: [
+            { // Warm Amber & Rose
+                name: 'Ember',
+                bg: [8, 4, 12],
+                petals: [
+                    [255, 120, 80],  [255, 90, 110],  [255, 160, 90],
+                    [220, 80, 100],  [255, 140, 70],   [230, 100, 130]
+                ],
+                glow: [255, 150, 80],
+                bokeh: [
+                    [255, 200, 120, 0.15], [255, 130, 80, 0.12],
+                    [255, 100, 140, 0.1],  [200, 180, 255, 0.08],
+                    [120, 255, 200, 0.06]
+                ],
+                stemColor: [40, 60, 30]
+            },
+            { // Cool Violet & Cyan
+                name: 'Moonlight',
+                bg: [6, 4, 16],
+                petals: [
+                    [160, 100, 255], [100, 160, 255], [200, 120, 255],
+                    [120, 200, 255], [180, 80, 220],  [80, 180, 255]
+                ],
+                glow: [150, 120, 255],
+                bokeh: [
+                    [180, 150, 255, 0.15], [100, 200, 255, 0.12],
+                    [255, 120, 200, 0.08], [120, 255, 220, 0.06],
+                    [255, 200, 150, 0.05]
+                ],
+                stemColor: [20, 40, 50]
+            },
+            { // Deep Crimson & Gold
+                name: 'Velvet',
+                bg: [12, 3, 6],
+                petals: [
+                    [220, 40, 60],  [180, 30, 70],   [255, 60, 40],
+                    [200, 50, 80],  [255, 180, 50],   [240, 70, 90]
+                ],
+                glow: [255, 80, 60],
+                bokeh: [
+                    [255, 100, 80, 0.15],  [255, 180, 60, 0.12],
+                    [255, 60, 100, 0.1],   [200, 120, 255, 0.06],
+                    [255, 220, 150, 0.08]
+                ],
+                stemColor: [40, 20, 15]
+            }
+        ],
+        currentPalette: 0,
+        speed: 1,
+        numFlowers: 5,
+        numBokeh: 120,
+        numFireflies: 40,
+        bloomIntensity: 0.6,
+    };
+
+    // ═══════════════════════════════════════════════════════
+    //  CANVAS SETUP
+    // ═══════════════════════════════════════════════════════
+
+    const mainCanvas = document.getElementById('mainCanvas');
+    const bloomCanvas = document.getElementById('bloomCanvas');
+    const glowCanvas = document.getElementById('glowCanvas');
+    const grainCanvas = document.getElementById('grainOverlay');
+
+    const ctx = mainCanvas.getContext('2d');
+    const bctx = bloomCanvas.getContext('2d');
+    const gctx = glowCanvas.getContext('2d');
+    const nctx = grainCanvas.getContext('2d');
+
+    let W, H;
+
+    function resize() {
+        W = window.innerWidth;
+        H = window.innerHeight;
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+        [mainCanvas, bloomCanvas, glowCanvas, grainCanvas].forEach(c => {
+            c.width = W * dpr;
+            c.height = H * dpr;
+            c.getContext('2d').scale(dpr, dpr);
+        });
+    }
+
+    window.addEventListener('resize', resize);
+    resize();
+
+    // ═══════════════════════════════════════════════════════
+    //  UTILITY FUNCTIONS
+    // ═══════════════════════════════════════════════════════
+
+    function lerp(a, b, t) { return a + (b - a) * t; }
+    function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+    function rand(min, max) { return Math.random() * (max - min) + min; }
+    function randInt(min, max) { return Math.floor(rand(min, max)); }
+
+    function easeInOutCubic(t) {
+        return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+    }
+
+    function easeOutBack(t) {
+        const c1 = 1.70158;
+        const c3 = c1 + 1;
+        return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+    }
+
+    function easeOutElastic(t) {
+        if (t === 0 || t === 1) return t;
+        return Math.pow(2, -10 * t) * Math.sin((t * 10 - 0.75) * (2 * Math.PI / 3)) + 1;
+    }
+
+    function rgba(r, g, b, a = 1) {
+        return `rgba(${Math.round(r)},${Math.round(g)},${Math.round(b)},${a})`;
+    }
+
+    function lerpColor(c1, c2, t) {
+        return [
+            lerp(c1[0], c2[0], t),
+            lerp(c1[1], c2[1], t),
+            lerp(c1[2], c2[2], t)
+        ];
+    }
+
+    // Simplex-like noise approximation
+    function noise2D(x, y) {
+        const n = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
+        return n - Math.floor(n);
+    }
+
+    function smoothNoise(x, y) {
+        const ix = Math.floor(x), iy = Math.floor(y);
+        const fx = x - ix, fy = y - iy;
+        const sx = fx * fx * (3 - 2 * fx);
+        const sy = fy * fy * (3 - 2 * fy);
+        const n00 = noise2D(ix, iy);
+        const n10 = noise2D(ix + 1, iy);
+        const n01 = noise2D(ix, iy + 1);
+        const n11 = noise2D(ix + 1, iy + 1);
+        return lerp(lerp(n00, n10, sx), lerp(n01, n11, sx), sy);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    //  PETAL GEOMETRY — Bezier-based organic shapes
+    // ═══════════════════════════════════════════════════════
+
+    class Petal {
+        constructor(flower, index, totalPetals, layer) {
+            this.flower = flower;
+            this.index = index;
+            this.layer = layer;
+            this.totalPetals = totalPetals;
+
+            // Angular position with natural variation
+            this.baseAngle = (index / totalPetals) * Math.PI * 2 + rand(-0.15, 0.15);
+            // Stagger bloom timing per layer
+            this.bloomDelay = layer * 0.18 + rand(0, 0.1);
+            this.bloomProgress = 0;
+
+            // Petal shape parameters
+            this.length = rand(50, 80) * (1 - layer * 0.15);
+            this.width = rand(22, 35);
+            this.curl = rand(0.1, 0.35);           // how much the petal curls backward
+            this.waviness = rand(0.02, 0.06);       // edge waviness
+            this.tipSharpness = rand(0.3, 0.8);     // pointed vs rounded tip
+
+            // Color from palette
+            const pal = CONFIG.palettes[CONFIG.currentPalette];
+            this.baseColor = pal.petals[index % pal.petals.length];
+            this.tipColor = lerpColor(this.baseColor, [255, 255, 240], 0.3);
+            this.innerColor = lerpColor(this.baseColor, [40, 10, 20], 0.5);
+
+            // Subtle motion
+            this.breathePhase = rand(0, Math.PI * 2);
+            this.breatheAmp = rand(0.01, 0.03);
+            this.swayPhase = rand(0, Math.PI * 2);
+            this.swayAmp = rand(0.02, 0.05);
+        }
+
+        update(time, dt) {
+            // Bloom animation
+            const bloomTarget = clamp((this.flower.bloomTime - this.bloomDelay) / 0.5, 0, 1);
+            this.bloomProgress = lerp(this.bloomProgress, bloomTarget, dt * 2);
+        }
+
+        draw(ctx, time) {
+            if (this.bloomProgress < 0.01) return;
+
+            const progress = easeOutBack(clamp(this.bloomProgress, 0, 1));
+            const breathe = Math.sin(time * 1.5 + this.breathePhase) * this.breatheAmp;
+            const sway = Math.sin(time * 0.8 + this.swayPhase) * this.swayAmp;
+
+            const angle = this.baseAngle + sway;
+            const openAngle = progress * (0.4 + this.layer * 0.25) + breathe;
+            const petalLen = this.length * progress;
+            const petalWidth = this.width * Math.sqrt(progress);
+
+            ctx.save();
+            ctx.rotate(angle);
+
+            // Simulate 3D curl by adjusting shape
+            const curlAmount = this.curl * progress;
+
+            // Draw petal shape using bezier curves
+            ctx.beginPath();
+
+            // Left edge
+            ctx.moveTo(0, 0);
+            ctx.bezierCurveTo(
+                -petalWidth * 0.5, petalLen * 0.25,
+                -petalWidth * (0.6 + Math.sin(time * 2 + this.index) * this.waviness), petalLen * 0.55,
+                -petalWidth * this.tipSharpness * 0.3, petalLen
+            );
+
+            // Tip
+            ctx.bezierCurveTo(
+                0, petalLen * (1 + curlAmount * 0.15),
+                0, petalLen * (1 + curlAmount * 0.15),
+                petalWidth * this.tipSharpness * 0.3, petalLen
+            );
+
+            // Right edge
+            ctx.bezierCurveTo(
+                petalWidth * (0.6 + Math.sin(time * 2 + this.index + 1) * this.waviness), petalLen * 0.55,
+                petalWidth * 0.5, petalLen * 0.25,
+                0, 0
+            );
+
+            ctx.closePath();
+
+            // Gradient fill — base to tip
+            const grad = ctx.createLinearGradient(0, 0, 0, petalLen);
+            grad.addColorStop(0, rgba(...this.innerColor, 0.95 * progress));
+            grad.addColorStop(0.3, rgba(...this.baseColor, 0.9 * progress));
+            grad.addColorStop(0.7, rgba(...this.baseColor, 0.85 * progress));
+            grad.addColorStop(1, rgba(...this.tipColor, 0.7 * progress));
+
+            ctx.fillStyle = grad;
+            ctx.fill();
+
+            // Subtle vein lines
+            this.drawVeins(ctx, petalLen, petalWidth, progress, time);
+
+            // Edge highlight (subsurface scattering simulation)
+            ctx.strokeStyle = rgba(
+                ...lerpColor(this.baseColor, [255, 255, 255], 0.4),
+                0.15 * progress
+            );
+            ctx.lineWidth = 0.5;
+            ctx.stroke();
+
+            // Inner glow on the petal
+            const glowGrad = ctx.createRadialGradient(0, petalLen * 0.4, 0, 0, petalLen * 0.4, petalLen * 0.6);
+            glowGrad.addColorStop(0, rgba(...this.baseColor, 0.2 * progress));
+            glowGrad.addColorStop(1, rgba(...this.baseColor, 0));
+            ctx.fillStyle = glowGrad;
+            ctx.fill();
+
+            ctx.restore();
+        }
+
+        drawVeins(ctx, len, width, progress, time) {
+            if (progress < 0.3) return;
+            const veinAlpha = (progress - 0.3) * 0.15;
+
+            ctx.save();
+            ctx.strokeStyle = rgba(
+                ...lerpColor(this.baseColor, [255, 255, 255], 0.2),
+                veinAlpha
+            );
+            ctx.lineWidth = 0.4;
+
+            // Central vein
+            ctx.beginPath();
+            ctx.moveTo(0, len * 0.05);
+            ctx.quadraticCurveTo(0, len * 0.5, 0, len * 0.9);
+            ctx.stroke();
+
+            // Side veins
+            for (let i = 0; i < 4; i++) {
+                const t = 0.2 + i * 0.18;
+                const y = len * t;
+                const spread = width * 0.3 * (1 - t * 0.5);
+
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.quadraticCurveTo(spread * 0.5, y - len * 0.04, spread, y - len * 0.08);
+                ctx.stroke();
+
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.quadraticCurveTo(-spread * 0.5, y - len * 0.04, -spread, y - len * 0.08);
+                ctx.stroke();
+            }
+
+            ctx.restore();
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════
+    //  FLOWER CLASS
+    // ═══════════════════════════════════════════════════════
+
+    class Flower {
+        constructor(x, y, scale, bloomStartTime) {
+            this.x = x;
+            this.y = y;
+            this.scale = scale;
+            this.bloomStartTime = bloomStartTime;
+            this.bloomTime = 0;
+
+            this.petals = [];
+            this.numLayers = randInt(2, 4);
+
+            // Create petal layers (outer to inner for draw order)
+            for (let layer = 0; layer < this.numLayers; layer++) {
+                const numPetals = layer === 0 ? randInt(7, 10) : randInt(5, 8);
+                const angleOffset = layer * 0.3; // offset each layer for natural look
+                for (let i = 0; i < numPetals; i++) {
+                    const petal = new Petal(this, i, numPetals, layer);
+                    petal.baseAngle += angleOffset;
+                    this.petals.push(petal);
+                }
+            }
+
+            // Sort petals by layer (draw outer first)
+            this.petals.sort((a, b) => a.layer - b.layer);
+
+            // Stem properties
+            this.stemHeight = rand(80, 160) * scale;
+            this.stemCurve = rand(-30, 30);
+            this.stemWidth = rand(2, 4) * scale;
+
+            // Sway
+            this.swayPhase = rand(0, Math.PI * 2);
+            this.swayAmp = rand(3, 8);
+
+            // Center pistil/stamen
+            this.stamenCount = randInt(8, 16);
+            this.stamenColors = [];
+            const pal = CONFIG.palettes[CONFIG.currentPalette];
+            for (let i = 0; i < this.stamenCount; i++) {
+                this.stamenColors.push(lerpColor(pal.glow, [255, 255, 200], rand(0, 0.5)));
+            }
+        }
+
+        update(time, dt) {
+            this.bloomTime = clamp((time - this.bloomStartTime) * CONFIG.speed, 0, 2);
+            this.petals.forEach(p => p.update(time, dt));
+        }
+
+        draw(ctx, time) {
+            const sway = Math.sin(time * 0.6 + this.swayPhase) * this.swayAmp;
+
+            ctx.save();
+            ctx.translate(this.x + sway, this.y);
+
+            // Draw stem
+            this.drawStem(ctx, time, sway);
+
+            // Draw leaves
+            this.drawLeaves(ctx, time);
+
+            // Scale for flower head
+            ctx.scale(this.scale, this.scale);
+
+            // Draw petals (back to front)
+            for (let i = this.petals.length - 1; i >= 0; i--) {
+                this.petals[i].draw(ctx, time);
+            }
+
+            // Draw center
+            this.drawCenter(ctx, time);
+
+            // Draw glow around flower
+            this.drawFlowerGlow(ctx, time);
+
+            ctx.restore();
+        }
+
+        drawStem(ctx, time, sway) {
+            if (this.bloomTime < 0.05) return;
+            const stemProgress = clamp(this.bloomTime * 2, 0, 1);
+            const pal = CONFIG.palettes[CONFIG.currentPalette];
+
+            ctx.save();
+            ctx.beginPath();
+
+            const stemLen = this.stemHeight * easeInOutCubic(stemProgress);
+            const cp1x = this.stemCurve * 0.5;
+            const cp1y = stemLen * 0.33;
+            const cp2x = this.stemCurve;
+            const cp2y = stemLen * 0.66;
+
+            ctx.moveTo(0, 0);
+            ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, 0, stemLen);
+
+            const stemGrad = ctx.createLinearGradient(0, 0, 0, stemLen);
+            stemGrad.addColorStop(0, rgba(...pal.stemColor, 0.9));
+            stemGrad.addColorStop(1, rgba(...lerpColor(pal.stemColor, [20, 10, 5], 0.5), 0.4));
+
+            ctx.strokeStyle = stemGrad;
+            ctx.lineWidth = this.stemWidth;
+            ctx.lineCap = 'round';
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        drawLeaves(ctx, time) {
+            if (this.bloomTime < 0.3) return;
+            const leafProgress = clamp((this.bloomTime - 0.3) * 3, 0, 1);
+            const pal = CONFIG.palettes[CONFIG.currentPalette];
+            const leafColor = lerpColor(pal.stemColor, [60, 120, 40], 0.4);
+
+            // Two small leaves on the stem
+            for (let side = -1; side <= 1; side += 2) {
+                ctx.save();
+                ctx.translate(this.stemCurve * 0.3 * side, this.stemHeight * 0.5);
+                ctx.rotate(side * 0.8 * leafProgress);
+                ctx.scale(leafProgress, leafProgress);
+
+                ctx.beginPath();
+                const lLen = 25 * this.scale;
+                const lWid = 10 * this.scale;
+                ctx.moveTo(0, 0);
+                ctx.bezierCurveTo(side * lWid, -lLen * 0.3, side * lWid * 0.5, -lLen * 0.8, 0, -lLen);
+                ctx.bezierCurveTo(-side * lWid * 0.3, -lLen * 0.7, -side * lWid * 0.2, -lLen * 0.2, 0, 0);
+
+                ctx.fillStyle = rgba(...leafColor, 0.7 * leafProgress);
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        drawCenter(ctx, time) {
+            if (this.bloomTime < 0.4) return;
+            const centerProgress = clamp((this.bloomTime - 0.4) * 3, 0, 1);
+            const pal = CONFIG.palettes[CONFIG.currentPalette];
+
+            // Pistil center — dark disk
+            const centerRadius = 8 * centerProgress;
+            const centerGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, centerRadius);
+            centerGrad.addColorStop(0, rgba(60, 30, 20, 0.9));
+            centerGrad.addColorStop(0.7, rgba(40, 20, 15, 0.8));
+            centerGrad.addColorStop(1, rgba(...this.petals[0].innerColor, 0.3));
+
+            ctx.beginPath();
+            ctx.arc(0, 0, centerRadius, 0, Math.PI * 2);
+            ctx.fillStyle = centerGrad;
+            ctx.fill();
+
+            // Stamen — tiny glowing dots around center
+            for (let i = 0; i < this.stamenCount; i++) {
+                const angle = (i / this.stamenCount) * Math.PI * 2 + time * 0.2;
+                const dist = centerRadius * (0.6 + 0.4 * Math.sin(time * 2 + i));
+                const sx = Math.cos(angle) * dist;
+                const sy = Math.sin(angle) * dist;
+                const sSize = 1.5 * centerProgress;
+
+                ctx.beginPath();
+                ctx.arc(sx, sy, sSize, 0, Math.PI * 2);
+                ctx.fillStyle = rgba(...this.stamenColors[i], 0.8 * centerProgress);
+                ctx.fill();
+
+                // Tiny glow
+                ctx.beginPath();
+                ctx.arc(sx, sy, sSize * 3, 0, Math.PI * 2);
+                ctx.fillStyle = rgba(...this.stamenColors[i], 0.15 * centerProgress);
+                ctx.fill();
+            }
+
+            // Pollen glow
+            const pollenGlow = ctx.createRadialGradient(0, 0, 0, 0, 0, centerRadius * 3);
+            pollenGlow.addColorStop(0, rgba(...pal.glow, 0.2 * centerProgress));
+            pollenGlow.addColorStop(1, rgba(...pal.glow, 0));
+            ctx.beginPath();
+            ctx.arc(0, 0, centerRadius * 3, 0, Math.PI * 2);
+            ctx.fillStyle = pollenGlow;
+            ctx.fill();
+        }
+
+        drawFlowerGlow(ctx, time) {
+            if (this.bloomTime < 0.2) return;
+            const glowProgress = clamp((this.bloomTime - 0.2) * 2, 0, 1);
+            const pal = CONFIG.palettes[CONFIG.currentPalette];
+            const pulse = 0.8 + 0.2 * Math.sin(time * 1.5 + this.swayPhase);
+
+            const glowRadius = 90 * glowProgress * pulse;
+            const flowerGlow = ctx.createRadialGradient(0, 0, 0, 0, 0, glowRadius);
+            flowerGlow.addColorStop(0, rgba(...pal.glow, 0.15 * glowProgress));
+            flowerGlow.addColorStop(0.5, rgba(...pal.glow, 0.05 * glowProgress));
+            flowerGlow.addColorStop(1, rgba(...pal.glow, 0));
+
+            ctx.beginPath();
+            ctx.arc(0, 0, glowRadius, 0, Math.PI * 2);
+            ctx.fillStyle = flowerGlow;
+            ctx.fill();
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════
+    //  BOKEH PARTICLE
+    // ═══════════════════════════════════════════════════════
+
+    class BokehParticle {
+        constructor() {
+            this.reset();
+        }
+
+        reset() {
+            this.x = rand(0, W);
+            this.y = rand(0, H);
+            this.z = rand(0.1, 1);  // depth (affects size, speed, blur)
+            this.baseSize = rand(2, 40) * this.z;
+            this.size = this.baseSize;
+
+            const pal = CONFIG.palettes[CONFIG.currentPalette];
+            const colorData = pal.bokeh[randInt(0, pal.bokeh.length)];
+            this.color = [colorData[0], colorData[1], colorData[2]];
+            this.alpha = colorData[3] * rand(0.5, 1.5);
+
+            this.vx = rand(-0.3, 0.3) * this.z;
+            this.vy = rand(-0.5, -0.1) * this.z;
+
+            this.pulsePhase = rand(0, Math.PI * 2);
+            this.pulseSpeed = rand(0.5, 2);
+            this.pulseAmp = rand(0.1, 0.3);
+
+            // Hexagonal or circular bokeh shape
+            this.isHex = Math.random() > 0.6;
+            this.rotation = rand(0, Math.PI);
+            this.rotSpeed = rand(-0.2, 0.2);
+
+            // Anamorphic streak (cinematic lens effect)
+            this.hasStreak = Math.random() > 0.7 && this.baseSize > 15;
+            this.streakLength = rand(1.5, 3);
+        }
+
+        update(time, dt) {
+            this.x += this.vx * CONFIG.speed;
+            this.y += this.vy * CONFIG.speed;
+            this.rotation += this.rotSpeed * dt;
+
+            // Gentle floating motion
+            this.x += Math.sin(time * 0.3 + this.pulsePhase) * 0.3 * this.z;
+            this.y += Math.cos(time * 0.2 + this.pulsePhase) * 0.15 * this.z;
+
+            // Pulse size
+            const pulse = 1 + Math.sin(time * this.pulseSpeed + this.pulsePhase) * this.pulseAmp;
+            this.size = this.baseSize * pulse;
+
+            // Wrap around
+            if (this.x < -50) this.x = W + 50;
+            if (this.x > W + 50) this.x = -50;
+            if (this.y < -50) this.y = H + 50;
+            if (this.y > H + 50) { this.y = -50; this.x = rand(0, W); }
+        }
+
+        draw(ctx, time) {
+            ctx.save();
+            ctx.translate(this.x, this.y);
+            ctx.rotate(this.rotation);
+
+            const alpha = this.alpha * (0.5 + 0.5 * Math.sin(time + this.pulsePhase));
+
+            if (this.hasStreak) {
+                // Anamorphic lens streak
+                ctx.save();
+                const streakGrad = ctx.createLinearGradient(
+                    -this.size * this.streakLength, 0,
+                    this.size * this.streakLength, 0
+                );
+                streakGrad.addColorStop(0, rgba(...this.color, 0));
+                streakGrad.addColorStop(0.3, rgba(...this.color, alpha * 0.3));
+                streakGrad.addColorStop(0.5, rgba(...this.color, alpha * 0.5));
+                streakGrad.addColorStop(0.7, rgba(...this.color, alpha * 0.3));
+                streakGrad.addColorStop(1, rgba(...this.color, 0));
+
+                ctx.fillStyle = streakGrad;
+                ctx.fillRect(
+                    -this.size * this.streakLength,
+                    -this.size * 0.15,
+                    this.size * this.streakLength * 2,
+                    this.size * 0.3
+                );
+                ctx.restore();
+            }
+
+            if (this.isHex) {
+                // Hexagonal bokeh
+                ctx.beginPath();
+                for (let i = 0; i < 6; i++) {
+                    const a = (i / 6) * Math.PI * 2;
+                    const px = Math.cos(a) * this.size;
+                    const py = Math.sin(a) * this.size;
+                    i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+                }
+                ctx.closePath();
+            } else {
+                // Circular bokeh
+                ctx.beginPath();
+                ctx.arc(0, 0, this.size, 0, Math.PI * 2);
+            }
+
+            // Bokeh ring effect (brighter edge, dimmer center like real lens bokeh)
+            const bokehGrad = ctx.createRadialGradient(0, 0, this.size * 0.6, 0, 0, this.size);
+            bokehGrad.addColorStop(0, rgba(...this.color, alpha * 0.3));
+            bokehGrad.addColorStop(0.7, rgba(...this.color, alpha * 0.5));
+            bokehGrad.addColorStop(0.85, rgba(...this.color, alpha * 0.8));
+            bokehGrad.addColorStop(1, rgba(...this.color, alpha * 0.1));
+
+            ctx.fillStyle = bokehGrad;
+            ctx.fill();
+
+            // Subtle edge highlight
+            ctx.strokeStyle = rgba(...this.color, alpha * 0.3);
+            ctx.lineWidth = 0.5;
+            ctx.stroke();
+
+            ctx.restore();
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════
+    //  FIREFLY / DUST MOTE
+    // ═══════════════════════════════════════════════════════
+
+    class Firefly {
+        constructor() {
+            this.reset();
+        }
+
+        reset() {
+            this.x = rand(0, W);
+            this.y = rand(0, H);
+            this.size = rand(0.5, 2.5);
+            this.alpha = 0;
+            this.maxAlpha = rand(0.3, 0.8);
+
+            const pal = CONFIG.palettes[CONFIG.currentPalette];
+            this.color = lerpColor(pal.glow, [255, 255, 220], rand(0, 0.6));
+
+            this.vx = rand(-0.5, 0.5);
+            this.vy = rand(-0.5, 0.5);
+            this.phase = rand(0, Math.PI * 2);
+            this.blinkSpeed = rand(0.5, 3);
+            this.wanderAngle = rand(0, Math.PI * 2);
+            this.wanderSpeed = rand(0.5, 2);
+            this.trailLength = randInt(3, 8);
+            this.trail = [];
+        }
+
+        update(time, dt) {
+            // Wander
+            this.wanderAngle += rand(-0.3, 0.3) * dt;
+            this.vx = lerp(this.vx, Math.cos(this.wanderAngle) * this.wanderSpeed, dt);
+            this.vy = lerp(this.vy, Math.sin(this.wanderAngle) * this.wanderSpeed, dt);
+
+            this.x += this.vx * CONFIG.speed;
+            this.y += this.vy * CONFIG.speed;
+
+            // Blink
+            this.alpha = this.maxAlpha * Math.max(0, Math.sin(time * this.blinkSpeed + this.phase));
+
+            // Trail
+            this.trail.push({ x: this.x, y: this.y, a: this.alpha });
+            if (this.trail.length > this.trailLength) this.trail.shift();
+
+            // Wrap
+            if (this.x < -20) this.x = W + 20;
+            if (this.x > W + 20) this.x = -20;
+            if (this.y < -20) this.y = H + 20;
+            if (this.y > H + 20) this.y = -20;
+        }
+
+        draw(ctx) {
+            // Trail
+            for (let i = 0; i < this.trail.length; i++) {
+                const t = this.trail[i];
+                const trailAlpha = t.a * (i / this.trail.length) * 0.3;
+                if (trailAlpha < 0.01) continue;
+
+                ctx.beginPath();
+                ctx.arc(t.x, t.y, this.size * 0.5, 0, Math.PI * 2);
+                ctx.fillStyle = rgba(...this.color, trailAlpha);
+                ctx.fill();
+            }
+
+            if (this.alpha < 0.01) return;
+
+            // Glow
+            const glowSize = this.size * 8;
+            const glow = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, glowSize);
+            glow.addColorStop(0, rgba(...this.color, this.alpha * 0.4));
+            glow.addColorStop(0.3, rgba(...this.color, this.alpha * 0.15));
+            glow.addColorStop(1, rgba(...this.color, 0));
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, glowSize, 0, Math.PI * 2);
+            ctx.fillStyle = glow;
+            ctx.fill();
+
+            // Core
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+            ctx.fillStyle = rgba(...this.color, this.alpha);
+            ctx.fill();
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════
+    //  SCENE SETUP
+    // ═══════════════════════════════════════════════════════
+
+    let flowers = [];
+    let bokehParticles = [];
+    let fireflies = [];
+    let startTime = 0;
+
+    function initScene() {
+        flowers = [];
+        bokehParticles = [];
+        fireflies = [];
+
+        const centerX = W * 0.5;
+        const centerY = H * 0.45;
+
+        // Arrange flowers in a natural cluster
+        const positions = [
+            { x: centerX, y: centerY, scale: 1.1, delay: 0 },                     // center (hero)
+            { x: centerX - W * 0.12, y: centerY + H * 0.05, scale: 0.85, delay: 0.5 },   // left
+            { x: centerX + W * 0.14, y: centerY + H * 0.03, scale: 0.9, delay: 0.3 },    // right
+            { x: centerX - W * 0.06, y: centerY + H * 0.12, scale: 0.65, delay: 0.8 },   // bottom left
+            { x: centerX + W * 0.08, y: centerY + H * 0.14, scale: 0.6, delay: 1.0 },    // bottom right
+        ];
+
+        positions.forEach(p => {
+            flowers.push(new Flower(p.x, p.y, p.scale, p.delay));
+        });
+
+        // Bokeh particles
+        for (let i = 0; i < CONFIG.numBokeh; i++) {
+            bokehParticles.push(new BokehParticle());
+        }
+
+        // Fireflies
+        for (let i = 0; i < CONFIG.numFireflies; i++) {
+            fireflies.push(new Firefly());
+        }
+
+        startTime = performance.now() / 1000;
+    }
+
+    // ═══════════════════════════════════════════════════════
+    //  BACKGROUND RENDERING
+    // ═══════════════════════════════════════════════════════
+
+    function drawBackground(ctx, time) {
+        const pal = CONFIG.palettes[CONFIG.currentPalette];
+        const [r, g, b] = pal.bg;
+
+        // Deep dark gradient background
+        const bgGrad = ctx.createRadialGradient(W * 0.5, H * 0.4, 0, W * 0.5, H * 0.4, W * 0.8);
+        bgGrad.addColorStop(0, rgba(r * 3, g * 3, b * 2, 1));
+        bgGrad.addColorStop(0.4, rgba(r * 2, g * 2, b * 1.5, 1));
+        bgGrad.addColorStop(1, rgba(r, g, b, 1));
+
+        ctx.fillStyle = bgGrad;
+        ctx.fillRect(0, 0, W, H);
+
+        // Subtle ambient light variations
+        const ambientPulse = 0.5 + 0.5 * Math.sin(time * 0.3);
+        const ambientGlow = ctx.createRadialGradient(
+            W * 0.5 + Math.sin(time * 0.2) * 50,
+            H * 0.35 + Math.cos(time * 0.15) * 30,
+            0,
+            W * 0.5, H * 0.4, W * 0.5
+        );
+        ambientGlow.addColorStop(0, rgba(...pal.glow, 0.03 * ambientPulse));
+        ambientGlow.addColorStop(0.5, rgba(...pal.glow, 0.01 * ambientPulse));
+        ambientGlow.addColorStop(1, rgba(0, 0, 0, 0));
+
+        ctx.fillStyle = ambientGlow;
+        ctx.fillRect(0, 0, W, H);
+
+        // Fog / mist layer at bottom
+        const fogGrad = ctx.createLinearGradient(0, H * 0.7, 0, H);
+        fogGrad.addColorStop(0, rgba(r * 4, g * 4, b * 3, 0));
+        fogGrad.addColorStop(0.5, rgba(r * 5, g * 5, b * 4, 0.05));
+        fogGrad.addColorStop(1, rgba(r * 6, g * 6, b * 5, 0.1));
+        ctx.fillStyle = fogGrad;
+        ctx.fillRect(0, 0, W, H);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    //  BLOOM / HALATION POST-PROCESSING
+    // ═══════════════════════════════════════════════════════
+
+    function applyBloom(sourceCanvas, destCtx, intensity) {
+        destCtx.clearRect(0, 0, W, H);
+
+        // Multi-pass blur simulation using scaled draws
+        destCtx.save();
+        destCtx.globalAlpha = intensity;
+
+        const passes = [
+            { scale: 0.5, alpha: 0.4 },
+            { scale: 0.25, alpha: 0.3 },
+            { scale: 0.125, alpha: 0.2 },
+        ];
+
+        passes.forEach(pass => {
+            destCtx.globalAlpha = pass.alpha * intensity;
+
+            // Create a temporary smaller canvas for blur
+            const tempCanvas = document.createElement('canvas');
+            const tempW = Math.max(1, Math.floor(W * pass.scale));
+            const tempH = Math.max(1, Math.floor(H * pass.scale));
+            tempCanvas.width = tempW;
+            tempCanvas.height = tempH;
+            const tctx = tempCanvas.getContext('2d');
+
+            // Draw source scaled down
+            tctx.drawImage(sourceCanvas, 0, 0, tempW, tempH);
+
+            // Draw back scaled up (creates blur effect)
+            destCtx.drawImage(tempCanvas, 0, 0, W, H);
+        });
+
+        destCtx.restore();
+    }
+
+    // ═══════════════════════════════════════════════════════
+    //  FILM GRAIN
+    // ═══════════════════════════════════════════════════════
+
+    function drawGrain(ctx, time) {
+        const imageData = ctx.createImageData(W, H);
+        const data = imageData.data;
+        const seed = Math.floor(time * 10);
+
+        // Sparse grain for performance
+        for (let i = 0; i < data.length; i += 16) {
+            const noise = ((Math.sin(i * 0.01 + seed) * 43758.5453) % 1) * 255;
+            data[i] = data[i + 1] = data[i + 2] = noise;
+            data[i + 3] = 255;
+        }
+
+        ctx.putImageData(imageData, 0, 0);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    //  LIGHT RAYS (volumetric god rays)
+    // ═══════════════════════════════════════════════════════
+
+    function drawLightRays(ctx, time) {
+        const pal = CONFIG.palettes[CONFIG.currentPalette];
+        const rayCount = 5;
+        const centerX = W * 0.5 + Math.sin(time * 0.1) * 30;
+        const centerY = -H * 0.1;
+
+        ctx.save();
+        ctx.globalCompositeOperation = 'screen';
+
+        for (let i = 0; i < rayCount; i++) {
+            const angle = (i / rayCount) * 0.8 - 0.4 + Math.sin(time * 0.2 + i) * 0.05;
+            const rayAlpha = 0.015 + 0.01 * Math.sin(time * 0.5 + i * 2);
+            const rayWidth = rand(40, 100);
+
+            ctx.save();
+            ctx.translate(centerX, centerY);
+            ctx.rotate(angle);
+
+            const rayGrad = ctx.createLinearGradient(0, 0, 0, H * 1.5);
+            rayGrad.addColorStop(0, rgba(...pal.glow, rayAlpha));
+            rayGrad.addColorStop(0.3, rgba(...pal.glow, rayAlpha * 0.7));
+            rayGrad.addColorStop(1, rgba(...pal.glow, 0));
+
+            ctx.fillStyle = rayGrad;
+            ctx.beginPath();
+            ctx.moveTo(-rayWidth * 0.3, 0);
+            ctx.lineTo(-rayWidth, H * 1.5);
+            ctx.lineTo(rayWidth, H * 1.5);
+            ctx.lineTo(rayWidth * 0.3, 0);
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.restore();
+        }
+
+        ctx.restore();
+    }
+
+    // ═══════════════════════════════════════════════════════
+    //  MAIN ANIMATION LOOP
+    // ═══════════════════════════════════════════════════════
+
+    let lastTime = 0;
+    let frameCount = 0;
+
+    function animate(timestamp) {
+        requestAnimationFrame(animate);
+
+        const time = (timestamp || 0) / 1000;
+        const dt = Math.min(time - lastTime, 0.05);
+        lastTime = time;
+        frameCount++;
+
+        // Clear
+        ctx.clearRect(0, 0, W, H);
+
+        // 1. Background
+        drawBackground(ctx, time);
+
+        // 2. Light rays
+        drawLightRays(ctx, time);
+
+        // 3. Background bokeh (behind flowers, z < 0.5)
+        bokehParticles
+            .filter(p => p.z < 0.5)
+            .forEach(p => { p.update(time, dt); p.draw(ctx, time); });
+
+        // 4. Flowers
+        flowers.forEach(f => { f.update(time, dt); f.draw(ctx, time); });
+
+        // 5. Foreground bokeh (in front, z >= 0.5)
+        bokehParticles
+            .filter(p => p.z >= 0.5)
+            .forEach(p => { p.update(time, dt); p.draw(ctx, time); });
+
+        // 6. Fireflies
+        fireflies.forEach(f => { f.update(time, dt); f.draw(ctx); });
+
+        // 7. Bloom / Halation post-processing
+        applyBloom(mainCanvas, bctx, CONFIG.bloomIntensity);
+
+        // 8. Secondary softer glow pass
+        applyBloom(mainCanvas, gctx, CONFIG.bloomIntensity * 0.5);
+
+        // 9. Film grain (update every few frames for performance)
+        if (frameCount % 3 === 0) {
+            drawGrain(nctx, time);
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════
+    //  CONTROLS
+    // ═══════════════════════════════════════════════════════
+
+    function resetBloom() {
+        initScene();
+    }
+
+    function togglePalette() {
+        CONFIG.currentPalette = (CONFIG.currentPalette + 1) % CONFIG.palettes.length;
+        const palName = CONFIG.palettes[CONFIG.currentPalette].name;
+
+        // Update bokeh and firefly colors
+        bokehParticles.forEach(p => {
+            const pal = CONFIG.palettes[CONFIG.currentPalette];
+            const colorData = pal.bokeh[randInt(0, pal.bokeh.length)];
+            p.color = [colorData[0], colorData[1], colorData[2]];
+            p.alpha = colorData[3] * rand(0.5, 1.5);
+        });
+
+        fireflies.forEach(f => {
+            const pal = CONFIG.palettes[CONFIG.currentPalette];
+            f.color = lerpColor(pal.glow, [255, 255, 220], rand(0, 0.6));
+        });
+
+        // Update flower colors
+        flowers.forEach(flower => {
+            const pal = CONFIG.palettes[CONFIG.currentPalette];
+            flower.stamenColors = flower.stamenColors.map(() =>
+                lerpColor(pal.glow, [255, 255, 200], rand(0, 0.5))
+            );
+            flower.petals.forEach((petal, i) => {
+                petal.baseColor = pal.petals[i % pal.petals.length];
+                petal.tipColor = lerpColor(petal.baseColor, [255, 255, 240], 0.3);
+                petal.innerColor = lerpColor(petal.baseColor, [40, 10, 20], 0.5);
+            });
+        });
+    }
+
+    function toggleSpeed() {
+        const speeds = [0.5, 1, 1.5, 2];
+        const currentIdx = speeds.indexOf(CONFIG.speed);
+        CONFIG.speed = speeds[(currentIdx + 1) % speeds.length];
+    }
+
+    // ═══════════════════════════════════════════════════════
+    //  MOUSE INTERACTION — Parallax & attraction
+    // ═══════════════════════════════════════════════════════
+
+    let mouseX = W / 2, mouseY = H / 2;
+
+    window.addEventListener('mousemove', (e) => {
+        mouseX = e.clientX;
+        mouseY = e.clientY;
+
+        // Fireflies gently attracted to cursor
+        fireflies.forEach(f => {
+            const dx = mouseX - f.x;
+            const dy = mouseY - f.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < 200) {
+                f.vx += dx * 0.0002;
+                f.vy += dy * 0.0002;
+            }
+        });
+    });
+
+    // Touch support
+    window.addEventListener('touchmove', (e) => {
+        if (e.touches.length > 0) {
+            mouseX = e.touches[0].clientX;
+            mouseY = e.touches[0].clientY;
+        }
+    }, { passive: true });
+
+    // Click to spawn a burst of fireflies
+    window.addEventListener('click', (e) => {
+        for (let i = 0; i < 8; i++) {
+            const f = new Firefly();
+            f.x = e.clientX + rand(-20, 20);
+            f.y = e.clientY + rand(-20, 20);
+            f.maxAlpha = rand(0.5, 1);
+            f.alpha = f.maxAlpha;
+            fireflies.push(f);
+        }
+        // Keep firefly count manageable
+        while (fireflies.length > CONFIG.numFireflies + 40) {
+            fireflies.shift();
+        }
+    });
+
+    // ═══════════════════════════════════════════════════════
+    //  INITIALIZATION
+    // ═══════════════════════════════════════════════════════
+
+    initScene();
+    animate(0);
+
+    </script>
+</body>
+</html>
+
